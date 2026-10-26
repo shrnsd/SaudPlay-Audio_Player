@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio_Forensics_Deck // v3.0</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --panel-bg: #111;
+            --border-color: #222;
+            --accent-primary: #00ffcc;
+            --accent-secondary: #ff0055;
+            --text-main: #e0e0e0;
+            --text-dim: #777;
+            --font-stack: 'Courier New', Courier, Consolas, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: var(--font-stack);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden; /* Desktop app feel */
+            font-size: 14px;
+        }
+
+        /* --- LAYOUT FIXES FOR RESPONSIVENESS/ZOOM --- */
+        #app-container {
+            display: flex;
+            flex: 1;
+            min-height: 0; /* Crucial for nested flexbox scrolling */
+            width: 100%;
+        }
+
+        #visualizer-pane {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            background: radial-gradient(circle at center, #151515 0%, #050505 100%);
+            min-width: 0;
+        }
+
+        #playlist-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 250px;
+            max-width: 400px;
+            background-color: var(--panel-bg);
+            border-left: 1px solid #000;
+        }
+
+        #control-deck {
+            flex-shrink: 0;
+            background-color: var(--panel-bg);
+            border-top: 1px solid var(--border-color);
+            padding: 15px 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            /* Adaptive constraints for heavy browser zoom */
+            max-height: 45vh; 
+            overflow-y: auto; 
+        }
+
+        /* Stack panels vertically if screen gets too narrow */
+        @media (max-width: 850px) {
+            #app-container { flex-direction: column; }
+            #playlist-pane { max-width: 100%; border-left: none; border-top: 1px solid var(--border-color); }
+            #visualizer-pane { border-right: none; }
+        }
+
+        /* --- VISUALIZER & STATS --- */
+        .panel-header {
+            color: var(--accent-primary);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 15px;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #canvas-container {
+            flex: 1;
+            width: 100%;
+            border: 1px solid var(--border-color);
+            background-color: #000;
+            position: relative;
+            min-height: 100px; /* Prevents canvas collapse on heavy zoom */
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #live-stats {
+            margin-top: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            color: var(--text-dim);
+            font-size: 12px;
+        }
+        
+        .stat-box span {
+            color: var(--accent-primary);
+            font-weight: bold;
+        }
+
+        /* --- PLAYLIST --- */
+        #drop-zone {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+            border-bottom-style: dashed;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        #drop-zone:hover, #drop-zone.dragover {
+            background-color: #1a1a1a;
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        #file-input { display: none; }
+
+        #queue-container {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .queue-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #1a1a1a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        
+        /* Drag and drop styling */
+        .queue-item.drag-over {
+            border-top: 2px dashed var(--accent-primary);
+            background-color: #151515;
+        }
+        .drag-handle {
+            color: var(--text-dim);
+            cursor: grab;
+            user-select: none;
+            font-size: 16px;
+        }
+        .drag-handle:active { cursor: grabbing; color: var(--text-main); }
+
+        .queue-item:hover { background-color: #1a1a1a; }
+        .queue-item.active {
+            background-color: #0a1f1a;
+            border-left: 3px solid var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        .track-info-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            overflow: hidden;
+            flex: 1;
+        }
+
+        .track-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+
+        .remove-btn {
+            background: none;
+            border: none;
+            color: var(--accent-secondary);
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 16px;
+            opacity: 0.5;
+            margin-left: 10px;
+        }
+        .remove-btn:hover { opacity: 1; }
+
+        .playlist-actions {
+            padding: 10px;
+            display: flex;
+            justify-content: flex-end;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* --- CONTROL DECK --- */
+        .scrubber-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        #time-current, #time-total {
+            font-size: 12px;
+            width: 45px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]:focus { outline: none; }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #333;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            height: 12px;
+            width: 12px;
+            border-radius: 0;
+            background: var(--accent-primary);
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -4px;
+        }
+
+        .deck-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 20px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: #1a1a1a;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            font-family: var(--font-stack);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+
+        button:hover {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        button:active { background: var(--accent-primary); color: #000; }
+        button.active-toggle { background: #0a1f1a; border-color: var(--accent-primary); color: var(--accent-primary); }
+        button.active-toggle.secondary { background: #2a0811; border-color: var(--accent-secondary); color: var(--accent-secondary); }
+
+        .icon-btn { font-size: 16px; padding: 5px 10px; }
+
+        .control-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            width: 100px; 
+            min-width: 100px;
+        }
+        
+        .slider-group.long { width: 180px; }
+
+        .eq-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            border-left: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            padding: 0 15px;
+        }
+
+        #ab-status {
+            font-size: 11px;
+            color: var(--accent-secondary);
+            margin-left: 5px;
+            min-width: 130px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #050505; }
+        ::-webkit-scrollbar-thumb { background: #333; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--accent-primary); }
+
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <!-- Left: Visualizer & Data -->
+        <div id="visualizer-pane">
+            <div class="panel-header">
+                <span>[SYS.AUDIO_FORENSICS]</span>
+                <span id="track-status">IDLE</span>
+            </div>
+            <div id="canvas-container">
+                <canvas id="visualizer"></canvas>
+            </div>
+            <div id="live-stats">
+                <div class="stat-box">SAMPLE RATE: <span id="stat-samplerate">---</span> Hz</div>
+                <div class="stat-box">SPEED: <span id="stat-speed">1.00</span>x</div>
+                <div class="stat-box">TRACK LOOP: <span id="stat-loop">OFF</span></div>
+                <div class="stat-box">BROWN NOISE: <span id="stat-noise">OFF</span></div>
+            </div>
+        </div>
+
+        <!-- Right: Playlist -->
+        <div id="playlist-pane">
+            <div class="panel-header" style="padding: 20px 20px 0 20px;">
+                <span>[FILE_QUEUE]</span>
+            </div>
+            
+            <div id="drop-zone">
+                > DRAG & DROP AUDIO FILES HERE <br>
+                <span style="font-size: 10px;">or click to browse local OS</span>
+            </div>
+            <input type="file" id="file-input" multiple accept="audio/*">
+            
+            <div class="playlist-actions">
+                <button id="btn-clear-queue" style="font-size: 10px; padding: 4px 8px;">CLEAR QUEUE</button>
+            </div>
+
+            <div id="queue-container">
+                <ul id="queue" style="list-style: none;">
+                    <!-- Items inject via JS -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom: Control Deck -->
+    <div id="control-deck">
+        <div class="scrubber-container">
+            <span id="time-current">00:00</span>
+            <input type="range" id="seek-bar" value="0" step="0.1" min="0" max="100">
+            <span id="time-total">00:00</span>
+        </div>
+
+        <div class="deck-controls">
+            <!-- Playback Controls -->
+            <div class="btn-group">
+                <button class="icon-btn" id="btn-prev">&#9198;</button>
+                <button class="icon-btn" id="btn-play">&#9658;</button>
+                <button class="icon-btn" id="btn-pause" style="display:none;">&#10074;&#10074;</button>
+                <button class="icon-btn" id="btn-next">&#9197;</button>
+                <button class="icon-btn" id="btn-loop-track" title="Toggle Track Loop">&#10227;</button>
+            </div>
+
+            <!-- Volume -->
+            <div class="slider-group long">
+                <span class="control-label">Volume (Max 200%)</span>
+                <div style="display: flex; align-items: center; width: 100%; gap: 5px;">
+                    <button class="icon-btn" id="btn-mute" style="border:none; padding:0; background:transparent;">&#128266;</button>
+                    <input type="range" id="volume-slider" min="0" max="2" step="0.01" value="1.0">
+                </div>
+            </div>
+
+            <!-- EQ: Bass & Treble with Reset Buttons -->
+            <div class="eq-panel">
+                <div class="slider-group">
+                    <div style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                        <span class="control-label" style="margin-bottom:0;">Bass</span>
+                        <button id="btn-reset-bass" style="font-size:10px; padding: 2px 6px; margin-bottom: 2px;">0 RESET</button>
+                    </div>
+                    <input type="range" id="bass-slider" min="-15" max="15" step="0.5" value="0" style="margin-top: 6px;">
+                </div>
+                <div class="slider-group">
+                    <div style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                        <span class="control-label" style="margin-bottom:0;">Treble</span>
+                        <button id="btn-reset-treble" style="font-size:10px; padding: 2px 6px; margin-bottom: 2px;">0 RESET</button>
+                    </div>
+                    <input type="range" id="treble-slider" min="-15" max="15" step="0.5" value="0" style="margin-top: 6px;">
+                </div>
+            </div>
+
+            <!-- Playback Speed -->
+            <div class="slider-group long">
+                <div style="display:flex; justify-content: space-between; width: 100%; align-items: center;">
+                    <span class="control-label" style="margin-bottom:0;">Playback Rate</span>
+                    <button id="btn-1x" style="font-size:10px; padding: 2px 6px; margin-bottom: 2px;">1X RESET</button>
+                </div>
+                <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.05" value="1.0" style="margin-top: 6px;">
+            </div>
+
+            <!-- A/B Looping -->
+            <div class="btn-group">
+                <button id="btn-set-a">Set A</button>
+                <button id="btn-set-b">Set B</button>
+                <button id="btn-clear-ab">Clear</button>
+                <span id="ab-status">LOOP: [NONE]</span>
+            </div>
+
+            <!-- Focus Layering -->
+            <div class="btn-group">
+                <button id="btn-noise-toggle">Brown Noise Layer</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CORE APPLICATION STATE ---
+        const AppState = {
+            queue: [],
+            currentIndex: -1,
+            audioCtx: null,
+            analyzer: null,
+            source: null,
+            masterGain: null,
+            bassFilter: null,
+            trebleFilter: null,
+            isPlaying: false,
+            isMuted: false,
+            loopA: null,
+            loopB: null,
+            noiseNode: null,
+            noiseGain: null,
+            isNoiseActive: false
+        };
+
+        const audio = new Audio();
+        audio.preservesPitch = true;
+        audio.loop = false;
+
+        // --- DOM ELEMENTS ---
+        const DOM = {
+            dropZone: document.getElementById('drop-zone'),
+            fileInput: document.getElementById('file-input'),
+            queueList: document.getElementById('queue'),
+            btnClearQueue: document.getElementById('btn-clear-queue'),
+            btnPlay: document.getElementById('btn-play'),
+            btnPause: document.getElementById('btn-pause'),
+            btnPrev: document.getElementById('btn-prev'),
+            btnNext: document.getElementById('btn-next'),
+            btnLoopTrack: document.getElementById('btn-loop-track'),
+            btnMute: document.getElementById('btn-mute'),
+            seekBar: document.getElementById('seek-bar'),
+            volBar: document.getElementById('volume-slider'),
+            bassBar: document.getElementById('bass-slider'),
+            trebleBar: document.getElementById('treble-slider'),
+            speedBar: document.getElementById('speed-slider'),
+            btnResetBass: document.getElementById('btn-reset-bass'),
+            btnResetTreble: document.getElementById('btn-reset-treble'),
+            btn1x: document.getElementById('btn-1x'),
+            timeCurrent: document.getElementById('time-current'),
+            timeTotal: document.getElementById('time-total'),
+            canvas: document.getElementById('visualizer'),
+            btnSetA: document.getElementById('btn-set-a'),
+            btnSetB: document.getElementById('btn-set-b'),
+            btnClearAB: document.getElementById('btn-clear-ab'),
+            abStatus: document.getElementById('ab-status'),
+            btnNoiseToggle: document.getElementById('btn-noise-toggle'),
+            statSampleRate: document.getElementById('stat-samplerate'),
+            statSpeed: document.getElementById('stat-speed'),
+            statLoop: document.getElementById('stat-loop'),
+            statNoise: document.getElementById('stat-noise'),
+            trackStatus: document.getElementById('track-status')
+        };
+
+        const canvasCtx = DOM.canvas.getContext('2d');
+
+        // --- WEB AUDIO API GRAPH ---
+        function initAudioContext() {
+            if (!AppState.audioCtx) {
+                AppState.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                AppState.source = AppState.audioCtx.createMediaElementSource(audio);
+                AppState.analyzer = AppState.audioCtx.createAnalyser();
+                AppState.analyzer.fftSize = 1024;
+                
+                AppState.masterGain = AppState.audioCtx.createGain();
+                AppState.masterGain.gain.value = AppState.isMuted ? 0 : DOM.volBar.value;
+
+                AppState.bassFilter = AppState.audioCtx.createBiquadFilter();
+                AppState.bassFilter.type = 'lowshelf';
+                AppState.bassFilter.frequency.value = 250; 
+                AppState.bassFilter.gain.value = DOM.bassBar.value;
+
+                AppState.trebleFilter = AppState.audioCtx.createBiquadFilter();
+                AppState.trebleFilter.type = 'highshelf';
+                AppState.trebleFilter.frequency.value = 4000; 
+                AppState.trebleFilter.gain.value = DOM.trebleBar.value;
+
+                AppState.source.connect(AppState.bassFilter);
+                AppState.bassFilter.connect(AppState.trebleFilter);
+                AppState.trebleFilter.connect(AppState.masterGain);
+                AppState.masterGain.connect(AppState.analyzer);
+                AppState.analyzer.connect(AppState.audioCtx.destination);
+
+                DOM.statSampleRate.innerText = AppState.audioCtx.sampleRate;
+                drawVisualizer();
+            }
+            if(AppState.audioCtx.state === 'suspended') AppState.audioCtx.resume();
+        }
+
+        // --- FILE & PLAYLIST MANAGEMENT (WITH DRAG & DROP) ---
+        DOM.dropZone.addEventListener('click', () => DOM.fileInput.click());
+        DOM.dropZone.addEventListener('dragover', (e) => { e.preventDefault(); DOM.dropZone.classList.add('dragover'); });
+        DOM.dropZone.addEventListener('dragleave', () => DOM.dropZone.classList.remove('dragover'));
+        DOM.dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            DOM.dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        DOM.fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        function handleFiles(files) {
+            for (let i = 0; i < files.length; i++) {
+                if (files[i].type.startsWith('audio/')) {
+                    AppState.queue.push({
+                        name: files[i].name,
+                        url: URL.createObjectURL(files[i])
+                    });
+                }
+            }
+            renderQueue();
+            if (AppState.currentIndex === -1 && AppState.queue.length > 0) loadTrack(0);
+        }
+
+        // Playlist Drag and Drop Logic
+        let dragStartIndex = null;
+
+        function handleDragStart(e) {
+            dragStartIndex = +e.currentTarget.dataset.index;
+            e.currentTarget.style.opacity = '0.5';
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function handleDragEnter(e) { e.currentTarget.classList.add('drag-over'); }
+        function handleDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+        
+        function handleDrop(e) {
+            e.stopPropagation();
+            const dragEndIndex = +e.currentTarget.dataset.index;
+            e.currentTarget.classList.remove('drag-over');
+            
+            if (dragStartIndex !== null && dragStartIndex !== dragEndIndex) {
+                swapQueueItems(dragStartIndex, dragEndIndex);
+            }
+            return false;
+        }
+
+        function swapQueueItems(fromIndex, toIndex) {
+            const item = AppState.queue.splice(fromIndex, 1)[0];
+            AppState.queue.splice(toIndex, 0, item);
+
+            // Shift playing index so the current song doesn't get interrupted incorrectly
+            if (AppState.currentIndex === fromIndex) {
+                AppState.currentIndex = toIndex;
+            } else if (AppState.currentIndex > fromIndex && AppState.currentIndex <= toIndex) {
+                AppState.currentIndex--;
+            } else if (AppState.currentIndex < fromIndex && AppState.currentIndex >= toIndex) {
+                AppState.currentIndex++;
+            }
+            
+            renderQueue();
+        }
+
+        function renderQueue() {
+            DOM.queueList.innerHTML = '';
+            AppState.queue.forEach((track, index) => {
+                const li = document.createElement('li');
+                li.className = `queue-item ${index === AppState.currentIndex ? 'active' : ''}`;
+                li.draggable = true;
+                li.dataset.index = index;
+
+                // Bind drag events
+                li.addEventListener('dragstart', handleDragStart);
+                li.addEventListener('dragover', handleDragOver);
+                li.addEventListener('drop', handleDrop);
+                li.addEventListener('dragenter', handleDragEnter);
+                li.addEventListener('dragleave', handleDragLeave);
+                li.addEventListener('dragend', (e) => e.currentTarget.style.opacity = '1');
+
+                const trackInfoGroup = document.createElement('div');
+                trackInfoGroup.className = 'track-info-group';
+
+                const dragHandle = document.createElement('span');
+                dragHandle.className = 'drag-handle';
+                dragHandle.innerHTML = '&#9776;'; // Hamburger icon
+                dragHandle.title = 'Drag to reorder';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'track-name';
+                nameSpan.title = track.name;
+                nameSpan.innerText = `${index + 1}. ${track.name}`;
+                nameSpan.onclick = () => loadTrack(index);
+
+                trackInfoGroup.appendChild(dragHandle);
+                trackInfoGroup.appendChild(nameSpan);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'remove-btn';
+                delBtn.innerHTML = '&#10005;';
+                delBtn.title = 'Remove Track';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeTrack(index);
+                };
+
+                li.appendChild(trackInfoGroup);
+                li.appendChild(delBtn);
+                DOM.queueList.appendChild(li);
+            });
+        }
+
+        function removeTrack(index) {
+            URL.revokeObjectURL(AppState.queue[index].url);
+            AppState.queue.splice(index, 1);
+            if (index === AppState.currentIndex) {
+                if (AppState.queue.length > 0) loadTrack(index >= AppState.queue.length ? 0 : index);
+                else resetPlayer();
+            } else if (index < AppState.currentIndex) {
+                AppState.currentIndex--;
+            }
+            renderQueue();
+        }
+
+        DOM.btnClearQueue.addEventListener('click', () => {
+            AppState.queue.forEach(track => URL.revokeObjectURL(track.url));
+            AppState.queue = [];
+            resetPlayer();
+            renderQueue();
+        });
+
+        // --- PLAYBACK CONTROL ---
+        function loadTrack(index) {
+            if (index < 0 || index >= AppState.queue.length) return;
+            initAudioContext();
+            
+            AppState.currentIndex = index;
+            audio.src = AppState.queue[index].url;
+            audio.load();
+            audio.playbackRate = DOM.speedBar.value;
+            
+            DOM.trackStatus.innerText = AppState.queue[index].name;
+            clearABLoop();
+            renderQueue();
+            playAudio();
+        }
+
+        function playAudio() {
+            if (!audio.src) return;
+            initAudioContext();
+            audio.play();
+            DOM.btnPlay.style.display = 'none';
+            DOM.btnPause.style.display = 'inline-block';
+            AppState.isPlaying = true;
+        }
+
+        function pauseAudio() {
+            audio.pause();
+            DOM.btnPlay.style.display = 'inline-block';
+            DOM.btnPause.style.display = 'none';
+            AppState.isPlaying = false;
+        }
+
+        function resetPlayer() {
+            pauseAudio();
+            audio.src = '';
+            AppState.currentIndex = -1;
+            DOM.trackStatus.innerText = 'IDLE';
+            DOM.timeCurrent.innerText = '00:00';
+            DOM.timeTotal.innerText = '00:00';
+            DOM.seekBar.value = 0;
+            clearABLoop();
+        }
+
+        DOM.btnPlay.addEventListener('click', playAudio);
+        DOM.btnPause.addEventListener('click', pauseAudio);
+        
+        DOM.btnNext.addEventListener('click', () => {
+            if (AppState.queue.length > 0) loadTrack((AppState.currentIndex + 1) % AppState.queue.length);
+        });
+
+        DOM.btnPrev.addEventListener('click', () => {
+            if (AppState.queue.length > 0) {
+                let prev = AppState.currentIndex - 1;
+                if (prev < 0) prev = AppState.queue.length - 1;
+                loadTrack(prev);
+            }
+        });
+
+        DOM.btnLoopTrack.addEventListener('click', () => {
+            audio.loop = !audio.loop;
+            DOM.btnLoopTrack.classList.toggle('active-toggle', audio.loop);
+            DOM.statLoop.innerText = audio.loop ? 'ON' : 'OFF';
+            DOM.statLoop.style.color = audio.loop ? 'var(--accent-primary)' : '';
+        });
+
+        audio.addEventListener('ended', () => {
+            if (!audio.loop && AppState.queue.length > 0) {
+                loadTrack((AppState.currentIndex + 1) % AppState.queue.length);
+            }
+        });
+
+        // --- EQ & GAIN CONTROLS ---
+        DOM.volBar.addEventListener('input', (e) => {
+            if(AppState.masterGain) AppState.masterGain.gain.value = AppState.isMuted ? 0 : e.target.value;
+        });
+        
+        DOM.btnMute.addEventListener('click', () => {
+            AppState.isMuted = !AppState.isMuted;
+            DOM.btnMute.innerHTML = AppState.isMuted ? '&#128263;' : '&#128266;';
+            if(AppState.masterGain) AppState.masterGain.gain.value = AppState.isMuted ? 0 : DOM.volBar.value;
+            else audio.muted = AppState.isMuted; 
+        });
+
+        DOM.bassBar.addEventListener('input', (e) => {
+            if(AppState.bassFilter) AppState.bassFilter.gain.value = e.target.value;
+        });
+        DOM.btnResetBass.addEventListener('click', () => {
+            DOM.bassBar.value = 0;
+            if(AppState.bassFilter) AppState.bassFilter.gain.value = 0;
+        });
+        
+        DOM.trebleBar.addEventListener('input', (e) => {
+            if(AppState.trebleFilter) AppState.trebleFilter.gain.value = e.target.value;
+        });
+        DOM.btnResetTreble.addEventListener('click', () => {
+            DOM.trebleBar.value = 0;
+            if(AppState.trebleFilter) AppState.trebleFilter.gain.value = 0;
+        });
+
+        DOM.speedBar.addEventListener('input', (e) => {
+            audio.playbackRate = e.target.value;
+            DOM.statSpeed.innerText = parseFloat(e.target.value).toFixed(2);
+        });
+
+        DOM.btn1x.addEventListener('click', () => {
+            DOM.speedBar.value = 1.0;
+            audio.playbackRate = 1.0;
+            DOM.statSpeed.innerText = '1.00';
+        });
+
+        // --- SCRUBBER & TIMERS ---
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return "00:00";
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        audio.addEventListener('loadedmetadata', () => {
+            DOM.seekBar.max = audio.duration;
+            DOM.timeTotal.innerText = formatTime(audio.duration);
+        });
+
+        audio.addEventListener('timeupdate', () => {
+            DOM.seekBar.value = audio.currentTime;
+            DOM.timeCurrent.innerText = formatTime(audio.currentTime);
+            if (AppState.loopB !== null && audio.currentTime >= AppState.loopB) {
+                audio.currentTime = AppState.loopA !== null ? AppState.loopA : 0;
+            }
+        });
+
+        DOM.seekBar.addEventListener('input', (e) => audio.currentTime = e.target.value);
+
+        // --- PRECISION A/B LOOPING ---
+        function updateABUI() {
+            const aStr = AppState.loopA !== null ? formatTime(AppState.loopA) : '--:--';
+            const bStr = AppState.loopB !== null ? formatTime(AppState.loopB) : '--:--';
+            DOM.abStatus.innerText = `LOOP: [${aStr} - ${bStr}]`;
+            
+            DOM.btnSetA.classList.toggle('active-toggle', AppState.loopA !== null);
+            DOM.btnSetB.classList.toggle('active-toggle', AppState.loopB !== null);
+        }
+
+        DOM.btnSetA.addEventListener('click', () => {
+            AppState.loopA = audio.currentTime;
+            if (AppState.loopB !== null && AppState.loopA >= AppState.loopB) AppState.loopB = null;
+            updateABUI();
+        });
+
+        DOM.btnSetB.addEventListener('click', () => {
+            AppState.loopB = audio.currentTime;
+            if (AppState.loopA !== null && AppState.loopB <= AppState.loopA) AppState.loopA = null;
+            updateABUI();
+        });
+
+        DOM.btnClearAB.addEventListener('click', clearABLoop);
+        function clearABLoop() { AppState.loopA = null; AppState.loopB = null; updateABUI(); }
+
+        // --- BROWN NOISE ENGINE ---
+        function generateBrownNoiseBuffer() {
+            const bufferSize = 2 * AppState.audioCtx.sampleRate;
+            const buffer = AppState.audioCtx.createBuffer(1, bufferSize, AppState.audioCtx.sampleRate);
+            const output = buffer.getChannelData(0);
+            let lastOut = 0;
+            for (let i = 0; i < bufferSize; i++) {
+                let white = Math.random() * 2 - 1;
+                output[i] = (lastOut + (0.02 * white)) / 1.02;
+                lastOut = output[i];
+                output[i] *= 3.5; 
+            }
+            return buffer;
+        }
+
+        DOM.btnNoiseToggle.addEventListener('click', () => {
+            initAudioContext();
+            if (AppState.isNoiseActive) {
+                if (AppState.noiseGain) {
+                    AppState.noiseGain.gain.exponentialRampToValueAtTime(0.001, AppState.audioCtx.currentTime + 1);
+                    setTimeout(() => { if (AppState.noiseNode) AppState.noiseNode.stop(); }, 1000);
+                }
+                AppState.isNoiseActive = false;
+                DOM.btnNoiseToggle.classList.remove('active-toggle', 'secondary');
+                DOM.statNoise.innerText = 'OFF';
+                DOM.statNoise.style.color = '';
+            } else {
+                AppState.noiseNode = AppState.audioCtx.createBufferSource();
+                AppState.noiseNode.buffer = generateBrownNoiseBuffer();
+                AppState.noiseNode.loop = true;
+                
+                AppState.noiseGain = AppState.audioCtx.createGain();
+                AppState.noiseGain.gain.setValueAtTime(0.001, AppState.audioCtx.currentTime);
+                AppState.noiseGain.gain.exponentialRampToValueAtTime(0.2, AppState.audioCtx.currentTime + 2);
+                
+                AppState.noiseNode.connect(AppState.noiseGain);
+                AppState.noiseGain.connect(AppState.audioCtx.destination);
+                AppState.noiseNode.start();
+                
+                AppState.isNoiseActive = true;
+                DOM.btnNoiseToggle.classList.add('active-toggle', 'secondary');
+                DOM.statNoise.innerText = 'ACTIVE';
+                DOM.statNoise.style.color = 'var(--accent-secondary)';
+            }
+        });
+
+        // --- REAL-TIME AUDIO FORENSICS (Visualizer) ---
+        function resizeCanvas() {
+            const container = document.getElementById('canvas-container');
+            if(container) {
+                DOM.canvas.width = container.clientWidth;
+                DOM.canvas.height = container.clientHeight;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        // Initial delay to ensure flexbox paints correctly before resizing
+        setTimeout(resizeCanvas, 100);
+
+        function drawVisualizer() {
+            requestAnimationFrame(drawVisualizer);
+            if (!AppState.analyzer) return;
+
+            const bufferLength = AppState.analyzer.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            AppState.analyzer.getByteFrequencyData(dataArray);
+
+            canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
+            canvasCtx.fillRect(0, 0, DOM.canvas.width, DOM.canvas.height);
+
+            const barWidth = (DOM.canvas.width / bufferLength) * 2.5;
+            let barHeight, x = 0;
+
+            for (let i = 0; i < bufferLength; i++) {
+                barHeight = dataArray[i];
+                const r = barHeight + (25 * (i / bufferLength));
+                const g = 255 - (barHeight / 2);
+                const b = 204 + (barHeight / 2);
+
+                canvasCtx.fillStyle = `rgb(0, ${Math.min(g, 255)}, ${Math.min(b, 255)})`;
+                canvasCtx.fillRect(x, DOM.canvas.height - (barHeight / 2), barWidth, barHeight / 2);
+                x += barWidth + 1;
+            }
+            canvasCtx.fillStyle = '#333';
+            canvasCtx.fillRect(0, DOM.canvas.height - 1, DOM.canvas.width, 1);
+        }
+    </script>
+</body>
+</html>
